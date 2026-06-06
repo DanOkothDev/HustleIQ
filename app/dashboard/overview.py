@@ -1,73 +1,37 @@
 from fastapi import APIRouter, Depends
 from app.auth.dependencies import get_current_user
 from app.database.connection import transactions_collection
-import statistics
+from app.services.analytics import compute_financial_overview
 
 router = APIRouter()
 
 
 @router.get("/dashboard/overview")
 def dashboard_overview(current_user=Depends(get_current_user)):
-
     user_id = current_user.get("user_id")
+    transactions = list(transactions_collection.find({"user_id": user_id}))
+    overview = compute_financial_overview(transactions)
 
-    transactions = list(
-        transactions_collection.find({"user_id": user_id})
-    )
-
-    if not transactions:
+    if overview["transactions_count"] == 0:
         return {
             "status": "no_data",
-            "message": "No transactions found"
+            "message": "No transactions found",
+            "summary": overview
         }
 
-    income = 0
-    expense = 0
-    categories = {}
-    amounts = []
-
-    for t in transactions:
-
-        amt = t.get("amount", 0)
-        amounts.append(amt)
-
-        if t["type"] == "income":
-            income += amt
-        else:
-            expense += amt
-
-        cat = t.get("category", "unknown")
-        categories[cat] = categories.get(cat, 0) + amt
-
-    profit = income - expense
-
-   
-    avg = statistics.mean(amounts)
-    volatility = statistics.stdev(amounts) if len(amounts) > 1 else 0
-
     health_score = 100
-
-    if profit < 0:
+    if overview["profit"] < 0:
         health_score -= 30
-
-    if volatility > avg * 0.8 and avg > 0:
+    if overview["volatility"] > overview["average_transaction"] * 0.8 and overview["average_transaction"] > 0:
         health_score -= 20
-
-    if categories and max(categories.values()) / sum(categories.values()) > 0.7:
+    if overview["top_category_ratio"] > 0.7:
         health_score -= 15
-
     health_score = max(0, min(100, health_score))
 
-    top_category = max(categories, key=categories.get)
-
-    
     ai_summary = []
-
-    if profit < 0:
+    if overview["profit"] < 0:
         ai_summary.append("Your expenses exceed income.")
-
-    ai_summary.append(f"Top activity is '{top_category}'.")
-
+    ai_summary.append(f"Top activity is '{overview['top_category']}'.")
     if health_score > 70:
         ai_summary.append("Overall financial health is stable.")
     else:
@@ -76,12 +40,13 @@ def dashboard_overview(current_user=Depends(get_current_user)):
     return {
         "user_id": user_id,
         "summary": {
-            "income": income,
-            "expense": expense,
-            "profit": profit
+            "income": overview["total_income"],
+            "expense": overview["total_expense"],
+            "profit": overview["profit"],
+            "transactions": overview["transactions_count"],
         },
         "health_score": health_score,
         "risk_level": "low" if health_score > 70 else "medium",
-        "top_category": top_category,
+        "top_category": overview["top_category"],
         "ai_summary": " ".join(ai_summary)
     }

@@ -7,7 +7,7 @@ const bgPhoto = "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=900
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-html,body,#root{width:100%;font-family:'Inter',sans-serif}
+html,body,#root{height:100%;width:100%;font-family:'Inter',sans-serif}
 
 .rg-root{display:flex;min-height:100vh;width:100%;background:#1c2a18}
 
@@ -154,8 +154,13 @@ export default function Register() {
       setError("Passwords don't match. Please check and try again.");
       return;
     }
-    if (!form.email && !form.phone_number) {
-      setError("Please enter your email address or phone number.");
+    if (!form.email) {
+      setError("Email is required.");
+      return;
+    }
+
+    if (!form.phone_number) {
+      setError("Phone number is required.");
       return;
     }
     setLoading(true);

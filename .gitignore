@@ -1,4 +1,16 @@
+# Environment variables
+.env
+.env.example
 venv/
-.venv/
-.env/
-env/
+__pycache__/
+
+# Python
+*.pyc
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

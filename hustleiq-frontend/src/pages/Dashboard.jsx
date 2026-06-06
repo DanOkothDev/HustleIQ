@@ -2,11 +2,28 @@ import { useEffect, useState, useCallback } from "react";
 import api from "../api/axios";
 import { useNavigate } from "react-router-dom";
 import {
-  AreaChart, Area, BarChart, Bar, Cell,
-  PieChart, Pie,
-  XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer,
-} from "recharts";
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  ArcElement,
+  Tooltip as ChartTooltip,
+  Legend,
+} from "chart.js";
+import { Line, Bar, Pie } from "react-chartjs-2";
+
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  ArcElement,
+  ChartTooltip,
+  Legend
+);
 
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
@@ -314,7 +331,15 @@ export default function Dashboard() {
   const [period,    setPeriod]    = useState("7M");
 
   const loadData = useCallback(async () => {
-    setLoading(true); setError(null);
+    const token = localStorage.getItem("token");
+    if (!token) {
+      nav("/");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
     try {
       const [o,c,r,i] = await Promise.all([
         api.get("/dashboard/overview"),
@@ -327,22 +352,133 @@ export default function Dashboard() {
       setRisk(r.data || null);
       setInsights(i.data || null);
       setExpenses(c.data?.expenses_breakdown || null);
-    } catch {
-      setError("Could not load your data. Check your connection and try again.");
+    } catch (err) {
+      setError(
+        err?.response?.data?.detail ||
+        "Could not load your data. Check your connection and try again."
+      );
+      if (err?.response?.status === 401) {
+        localStorage.removeItem("token");
+        nav("/");
+      }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [nav]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      nav("/");
+      return;
+    }
+    loadData();
+  }, [loadData, nav]);
 
   const riskColors = RISK_COLOR(risk?.level);
   const riskBarCol = RISK_BAR(risk?.level);
   const healthColor = overview?.health_score >= 70 ? "#2a6e3e"
     : overview?.health_score >= 40 ? "#a16207" : "#b91c1c";
-  const totalExp = (expenses||[]).reduce((s,e) => s+(e.value||0), 0);
+  const totalExp = (expenses || []).reduce((s, e) => s + (e.value || 0), 0);
   const cfSeries = cashflow?.series || [];
   const insightList = Array.isArray(insights) ? insights : [];
+
+  const cashflowLineData = {
+    labels: cfSeries.map((item) => item.month),
+    datasets: [
+      {
+        label: "Money In",
+        data: cfSeries.map((item) => item.income ?? 0),
+        borderColor: "#3a8c4e",
+        backgroundColor: "rgba(58,140,78,0.18)",
+        fill: true,
+        tension: 0.35,
+        pointRadius: 0,
+      },
+      {
+        label: "Money Out",
+        data: cfSeries.map((item) => item.expenses ?? 0),
+        borderColor: "#c83a2a",
+        backgroundColor: "rgba(200,58,42,0.15)",
+        fill: true,
+        tension: 0.35,
+        pointRadius: 0,
+      },
+    ],
+  };
+
+  const chartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          label: (ctx) => `${ctx.dataset.label}: ${fmtKES(ctx.parsed.y ?? ctx.parsed)}`,
+        },
+      },
+    },
+    scales: {
+      x: {
+        ticks: { color: "#8a9882", font: { family: "Inter", size: 11 } },
+        grid: { display: false },
+      },
+      y: {
+        ticks: {
+          color: "#8a9882",
+          font: { family: "Inter", size: 11 },
+          callback: (value) => `${(value / 1000).toFixed(0)}K`,
+        },
+        grid: { color: "#ccc7ba", borderDash: [3, 3] },
+      },
+    },
+  };
+
+  const profitBarData = {
+    labels: cfSeries.map((item) => item.month),
+    datasets: [
+      {
+        label: "Profit",
+        data: cfSeries.map((item) => (item.income ?? 0) - (item.expenses ?? 0)),
+        backgroundColor: cfSeries.map((item) => ((item.income ?? 0) - (item.expenses ?? 0)) >= 0 ? "#3a8c4e" : "#c83a2a"),
+      },
+    ],
+  };
+
+  const profitBarOptions = {
+    ...chartOptions,
+    plugins: {
+      ...chartOptions.plugins,
+      legend: { display: false },
+    },
+  };
+
+  const pieData = {
+    labels: expenses?.map((item) => item.name) || [],
+    datasets: [
+      {
+        data: expenses?.map((item) => item.value) || [],
+        backgroundColor: PIE_COLORS,
+        hoverOffset: 6,
+      },
+    ],
+  };
+
+  const pieOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        position: "bottom",
+        labels: { color: "#1c2a18", font: { size: 11 } },
+      },
+      tooltip: {
+        callbacks: {
+          label: (ctx) => `${ctx.label}: ${fmtKES(ctx.parsed)}`,
+        },
+      },
+    },
+  };
 
   return (
     <>
@@ -424,7 +560,7 @@ export default function Dashboard() {
                 {loading ? (<><Sk w="40%" h={10} mb={10}/><Sk w="65%" h={24} mb={8}/><Sk w="50%" h={10}/></>) : (<>
                   <div className="db-kpi-emoji">I</div>
                   <div className="db-kpi-label">Money In</div>
-                  <div className="db-kpi-value">{fmtKES(overview?.summary?.revenue)}</div>
+                  <div className="db-kpi-value">{fmtKES(overview?.summary?.income)}</div>
                   <div className="db-kpi-sub">Total sales</div>
                 </>)}
               </div>
@@ -432,7 +568,7 @@ export default function Dashboard() {
                 {loading ? (<><Sk w="40%" h={10} mb={10}/><Sk w="65%" h={24} mb={8}/><Sk w="50%" h={10}/></>) : (<>
                   <div className="db-kpi-emoji">O</div>
                   <div className="db-kpi-label">Money Out</div>
-                  <div className="db-kpi-value">{fmtKES(overview?.summary?.expenses)}</div>
+                  <div className="db-kpi-value">{fmtKES(overview?.summary?.expense)}</div>
                   <div className="db-kpi-sub">Total costs</div>
                 </>)}
               </div>
@@ -468,35 +604,9 @@ export default function Dashboard() {
                       No data yet. Add transactions to see your chart.
                     </div>
                   ) : (
-                    <ResponsiveContainer width="100%" height={210}>
-                      <AreaChart data={cfSeries} margin={{ top:4, right:4, left:-14, bottom:0 }}>
-                        <defs>
-                          <linearGradient id="incG" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%"  stopColor="#3a8c4e" stopOpacity={0.2}/>
-                            <stop offset="95%" stopColor="#3a8c4e" stopOpacity={0}/>
-                          </linearGradient>
-                          <linearGradient id="expG" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%"  stopColor="#c83a2a" stopOpacity={0.15}/>
-                            <stop offset="95%" stopColor="#c83a2a" stopOpacity={0}/>
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid stroke="#ccc7ba" strokeDasharray="3 3" vertical={false}/>
-                        <XAxis dataKey="month"
-                          tick={{ fill:"#8a9882", fontSize:11, fontFamily:"Inter" }}
-                          axisLine={false} tickLine={false} dy={6}/>
-                        <YAxis
-                          tick={{ fill:"#8a9882", fontSize:11, fontFamily:"Inter" }}
-                          axisLine={false} tickLine={false}
-                          tickFormatter={(v) => `${(v/1000).toFixed(0)}K`}/>
-                        <Tooltip content={<ChartTip/>}/>
-                        <Area type="monotone" dataKey="income" name="Money In"
-                          stroke="#3a8c4e" strokeWidth={2}
-                          fill="url(#incG)" dot={false} activeDot={{ r:5, fill:"#3a8c4e" }}/>
-                        <Area type="monotone" dataKey="expenses" name="Money Out"
-                          stroke="#c83a2a" strokeWidth={2}
-                          fill="url(#expG)" dot={false} activeDot={{ r:5, fill:"#c83a2a" }}/>
-                      </AreaChart>
-                    </ResponsiveContainer>
+                    <div style={{ width: "100%", height: 210 }}>
+                      <Line data={cashflowLineData} options={chartOptions} />
+                    </div>
                   )}
                 </div>
               </div>
@@ -560,24 +670,9 @@ export default function Dashboard() {
                     <div className="db-empty"><div className="db-empty-icon">Expense</div>No expense data yet.</div>
                   ) : (
                     <>
-                      <ResponsiveContainer width="100%" height={130}>
-                        <PieChart>
-                          <Pie data={expenses} dataKey="value" nameKey="name"
-                            cx="50%" cy="50%"
-                            innerRadius={36} outerRadius={58}
-                            paddingAngle={3} stroke="none">
-                            {expenses.map((_,i) => (
-                              <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]}/>
-                            ))}
-                          </Pie>
-                          <Tooltip
-                            formatter={(v) => fmtKES(v)}
-                            contentStyle={{
-                              background:"#243020", border:"1px solid rgba(255,255,255,0.1)",
-                              borderRadius:8, fontSize:12, color:"#c8ddb8",
-                            }}/>
-                        </PieChart>
-                      </ResponsiveContainer>
+                      <div style={{ width: "100%", height: 170, marginBottom: 18 }}>
+                        <Pie data={pieData} options={pieOptions} />
+                      </div>
                       <div>
                         {expenses.map((e,i) => (
                           <div key={e.name} className="db-exp-row">
@@ -606,31 +701,9 @@ export default function Dashboard() {
                   {loading ? <Sk w="100%" h={250}/> : cfSeries.length===0 ? (
                     <div className="db-empty"><div className="db-empty-icon">Data</div>No data yet.</div>
                   ) : (
-                    <ResponsiveContainer width="100%" height={250}>
-                      <BarChart
-                        data={cfSeries.map((s) => ({
-                          month:s.month,
-                          profit:(s.income??0)-(s.expenses??0),
-                        }))}
-                        margin={{ top:4, right:4, left:-14, bottom:0 }}
-                        barCategoryGap="35%">
-                        <CartesianGrid stroke="#ccc7ba" strokeDasharray="3 3" vertical={false}/>
-                        <XAxis dataKey="month"
-                          tick={{ fill:"#8a9882", fontSize:11, fontFamily:"Inter" }}
-                          axisLine={false} tickLine={false} dy={6}/>
-                        <YAxis
-                          tick={{ fill:"#8a9882", fontSize:11, fontFamily:"Inter" }}
-                          axisLine={false} tickLine={false}
-                          tickFormatter={(v) => `${(v/1000).toFixed(0)}K`}/>
-                        <Tooltip content={<ChartTip/>}/>
-                        <Bar dataKey="profit" name="Profit" radius={[4,4,0,0]}>
-                          {cfSeries.map((s,i) => {
-                            const p = (s.income??0)-(s.expenses??0);
-                            return <Cell key={i} fill={p>=0 ? "#3a8c4e" : "#c83a2a"}/>;
-                          })}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
+                    <div style={{ width: "100%", height: 250 }}>
+                      <Bar data={profitBarData} options={profitBarOptions} />
+                    </div>
                   )}
                 </div>
               </div>
